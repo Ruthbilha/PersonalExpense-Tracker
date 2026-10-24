@@ -1,12 +1,14 @@
+
 import React, { useEffect, useState } from 'react';
 import {
   View,
-  Text,
+  Text as NativeText,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
   ScrollView,
+  StyleSheet,
   Alert,
+  useWindowDimensions,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -18,53 +20,120 @@ type Transaction = {
   category: string;
 };
 
-const STORAGE_KEY = 'personal_expense_tracker_transactions';
+type Screen = 'Home' | 'Transactions' | 'Insights' | 'Settings';
 
-const initialTransactions: Transaction[] = [
-  {
-    id: 1,
-    title: 'Salary',
-    amount: 20000,
-    type: 'Income',
-    category: 'Salary',
-  },
-  {
-    id: 2,
-    title: 'Lunch',
-    amount: 500,
-    type: 'Expense',
-    category: 'Food',
-  },
-  {
-    id: 3,
-    title: 'Transport',
-    amount: 200,
-    type: 'Expense',
-    category: 'Transport',
-  },
+const STORAGE_KEY = 'personal_expense_tracker_transactions';
+const PREFERENCES_KEY = 'personal_expense_tracker_preferences';
+
+const themeOptions = [
+  { name: 'Blue', value: '#3157D5' },
+  { name: 'Purple', value: '#7C3AED' },
+  { name: 'Green', value: '#13834B' },
+  { name: 'Pink', value: '#DB2777' },
+  { name: 'Teal', value: '#0F766E' },
+  { name: 'Orange', value: '#EA580C' },
 ];
 
+const initialTransactions: Transaction[] = [
+  { id: 1, title: 'Salary', amount: 20000, type: 'Income', category: 'Salary' },
+  { id: 2, title: 'Lunch', amount: 500, type: 'Expense', category: 'Food' },
+  { id: 3, title: 'Transport', amount: 200, type: 'Expense', category: 'Transport' },
+];
+
+const navigation: { name: Screen; icon: string }[] = [
+  { name: 'Home', icon: '⌂' },
+  { name: 'Transactions', icon: '⇄' },
+  { name: 'Insights', icon: '▥' },
+  { name: 'Settings', icon: '⚙' },
+];
+
+const money = (amount: number) =>
+  `KSh ${amount.toLocaleString('en-KE', {
+    maximumFractionDigits: 2,
+  })}`;
+
 export default function App() {
+  const { width } = useWindowDimensions();
+  const wideScreen = width >= 850;
+
+  const [screen, setScreen] = useState<Screen>('Home');
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [transactions, setTransactions] =
     useState<Transaction[]>(initialTransactions);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [type, setType] = useState<'Income' | 'Expense'>('Expense');
   const [category, setCategory] = useState('Food');
-  const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load saved transactions when the app starts.
+  const [appearance, setAppearance] = useState('Light');
+  const [themeColor, setThemeColor] = useState('#3157D5');
+  const [customColor, setCustomColor] = useState('#3157D5');
+  const [fontPreference, setFontPreference] = useState('System');
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+
+  function AppText(props: React.ComponentProps<typeof NativeText>) {
+    const chosenFont =
+      fontPreference === 'Serif'
+        ? 'serif'
+        : fontPreference === 'Monospace'
+          ? 'monospace'
+          : undefined;
+    return (
+      <NativeText
+        {...props}
+        style={[{ fontFamily: chosenFont }, props.style]}
+      />
+    );
+  }
+
+  useEffect(() => {
+    async function loadPreferences() {
+      try {
+        const saved = await AsyncStorage.getItem(PREFERENCES_KEY);
+        if (saved) {
+          const prefs = JSON.parse(saved) as {
+            appearance?: string;
+            themeColor?: string;
+            fontPreference?: string;
+          };
+          if (['Light', 'Dark'].includes(prefs.appearance ?? '')) {
+            setAppearance(prefs.appearance!);
+          }
+          if (typeof prefs.themeColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(prefs.themeColor)) {
+            setThemeColor(prefs.themeColor);
+            setCustomColor(prefs.themeColor);
+          }
+          if (['System', 'Serif', 'Monospace'].includes(prefs.fontPreference ?? '')) {
+            setFontPreference(prefs.fontPreference!);
+          }
+        }
+      } catch (error) {
+        console.error('Could not load preferences:', error);
+      } finally {
+        setPreferencesLoaded(true);
+      }
+    }
+    loadPreferences();
+  }, []);
+
+  useEffect(() => {
+    if (!preferencesLoaded) return;
+    AsyncStorage.setItem(
+      PREFERENCES_KEY,
+      JSON.stringify({ appearance, themeColor, fontPreference }),
+    ).catch((error) => console.error('Could not save preferences:', error));
+  }, [appearance, themeColor, fontPreference, preferencesLoaded]);
+
   useEffect(() => {
     async function loadTransactions() {
       try {
-        const savedTransactions = await AsyncStorage.getItem(STORAGE_KEY);
-
-        if (savedTransactions !== null) {
-          const parsedTransactions: unknown = JSON.parse(savedTransactions);
-
-          if (Array.isArray(parsedTransactions)) {
-            setTransactions(parsedTransactions as Transaction[]);
+        const saved = await AsyncStorage.getItem(STORAGE_KEY);
+        if (saved !== null) {
+          const parsed: unknown = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setTransactions(parsed as Transaction[]);
           }
         }
       } catch (error) {
@@ -73,11 +142,9 @@ export default function App() {
         setIsLoaded(true);
       }
     }
-
     loadTransactions();
   }, []);
 
-  // Save transactions whenever the list changes.
   useEffect(() => {
     if (!isLoaded) return;
 
@@ -85,25 +152,41 @@ export default function App() {
       try {
         await AsyncStorage.setItem(
           STORAGE_KEY,
-          JSON.stringify(transactions)
+          JSON.stringify(transactions),
         );
       } catch (error) {
         console.error('Could not save transactions:', error);
       }
     }
-
     saveTransactions();
   }, [transactions, isLoaded]);
 
   const income = transactions
     .filter((item) => item.type === 'Income')
-    .reduce((total, item) => total + item.amount, 0);
+    .reduce((sum, item) => sum + item.amount, 0);
 
   const expenses = transactions
     .filter((item) => item.type === 'Expense')
-    .reduce((total, item) => total + item.amount, 0);
+    .reduce((sum, item) => sum + item.amount, 0);
 
   const balance = income - expenses;
+  const dark = appearance === 'Dark';
+
+  const colors = {
+    background: dark ? '#101522' : '#F5F7FB',
+    surface: dark ? '#1B2333' : '#FFFFFF',
+    text: dark ? '#F4F6FC' : '#172033',
+    muted: dark ? '#AAB4C8' : '#737D90',
+    border: dark ? '#354056' : '#E0E5EF',
+    primary: themeColor,
+    green: '#13834B',
+    red: '#D14343',
+  };
+
+  function navigate(destination: Screen) {
+    setScreen(destination);
+    setDrawerOpen(false);
+  }
 
   function addTransaction() {
     const numericAmount = Number(amount);
@@ -116,7 +199,7 @@ export default function App() {
     ) {
       Alert.alert(
         'Check your details',
-        'Enter a description and an amount greater than zero.'
+        'Enter a description and an amount greater than zero.',
       );
       return;
     }
@@ -132,155 +215,726 @@ export default function App() {
     setTransactions((current) => [newTransaction, ...current]);
     setTitle('');
     setAmount('');
+    Alert.alert('Saved', 'Your transaction has been added.');
+  }
+
+  function renderSidebar() {
+    return (
+      <View
+        style={[
+          styles.sidebar,
+          {
+            backgroundColor: colors.surface,
+            borderColor: colors.border,
+          },
+          !wideScreen && styles.drawer,
+        ]}
+      >
+        <View style={styles.brand}>
+          <View style={styles.brandIcon}>
+            <AppText style={styles.brandIconText}>₭</AppText>
+          </View>
+          <View>
+            <AppText style={[styles.brandName, { color: colors.text }]}>
+              PocketTrack
+            </AppText>
+            <AppText style={[styles.smallMuted, { color: colors.muted }]}>
+              PERSONAL FINANCE
+            </AppText>
+          </View>
+        </View>
+
+        <AppText style={[styles.navLabel, { color: colors.muted }]}>
+          WORKSPACE
+        </AppText>
+
+        {navigation.map((item) => {
+          const selected = screen === item.name;
+          return (
+            <TouchableOpacity
+              key={item.name}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              onPress={() => navigate(item.name)}
+              style={[
+                styles.navItem,
+                selected && [styles.navItemSelected, { backgroundColor: themeColor }],
+              ]}
+            >
+              <AppText
+                style={[
+                  styles.navIcon,
+                  { color: selected ? '#FFFFFF' : colors.muted },
+                ]}
+              >
+                {item.icon}
+              </AppText>
+              <AppText
+                style={[
+                  styles.navText,
+                  { color: selected ? '#FFFFFF' : colors.text },
+                ]}
+              >
+                {item.name}
+              </AppText>
+              {selected && <View style={styles.activeDot} />}
+            </TouchableOpacity>
+          );
+        })}
+
+        <View style={styles.sidebarFooter}>
+          <View style={styles.avatar}>
+            <AppText style={styles.avatarText}>R</AppText>
+          </View>
+          <View style={{ flex: 1 }}>
+            <AppText style={[styles.profileName, { color: colors.text }]}>
+              My finances
+            </AppText>
+            <AppText style={[styles.smallMuted, { color: colors.muted }]}>
+              Personal account
+            </AppText>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  function renderSummaryCards() {
+    return (
+      <View style={styles.summaryRow}>
+        <View
+          style={[
+            styles.summaryCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <AppText style={[styles.cardLabel, { color: colors.muted }]}>
+            Total income
+          </AppText>
+          <AppText style={[styles.summaryAmount, { color: colors.green }]}>
+            {money(income)}
+          </AppText>
+        </View>
+
+        <View
+          style={[
+            styles.summaryCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <AppText style={[styles.cardLabel, { color: colors.muted }]}>
+            Total expenses
+          </AppText>
+          <AppText style={[styles.summaryAmount, { color: colors.red }]}>
+            {money(expenses)}
+          </AppText>
+        </View>
+      </View>
+    );
+  }
+
+  function renderTransaction(item: Transaction) {
+    return (
+      <View
+        key={item.id}
+        style={[
+          styles.transactionRow,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <View style={styles.transactionIcon}>
+          <AppText style={styles.transactionIconText}>
+            {item.type === 'Income' ? '↙' : '↗'}
+          </AppText>
+        </View>
+        <View style={{ flex: 1 }}>
+          <AppText style={[styles.transactionTitle, { color: colors.text }]}>
+            {item.title}
+          </AppText>
+          <AppText style={[styles.smallMuted, { color: colors.muted }]}>
+            {item.category} · {item.type}
+          </AppText>
+        </View>
+        <AppText
+          style={{
+            color: item.type === 'Income' ? colors.green : colors.red,
+            fontWeight: '700',
+          }}
+        >
+          {item.type === 'Income' ? '+' : '−'}{money(item.amount)}
+        </AppText>
+      </View>
+    );
+  }
+
+  function renderHome() {
+    return (
+      <>
+        <View style={[styles.balanceCard, { backgroundColor: colors.primary }]}>
+          <AppText style={styles.balanceLabel}>AVAILABLE BALANCE</AppText>
+          <AppText style={styles.balanceAmount}>{money(balance)}</AppText>
+          <AppText style={styles.balanceNote}>
+            Income minus recorded expenses
+          </AppText>
+        </View>
+
+        {renderSummaryCards()}
+
+        <View style={styles.sectionHeadingRow}>
+          <AppText style={[styles.sectionTitle, { color: colors.text }]}>
+            Recent transactions
+          </AppText>
+          <TouchableOpacity onPress={() => navigate('Transactions')}>
+            <AppText style={[styles.linkText, { color: themeColor }]}>View all →</AppText>
+          </TouchableOpacity>
+        </View>
+
+        {transactions.length === 0 ? (
+          <AppText style={[styles.emptyText, { color: colors.muted }]}>
+            No transactions yet. Add your first transaction.
+          </AppText>
+        ) : (
+          transactions.slice(0, 5).map(renderTransaction)
+        )}
+      </>
+    );
+  }
+
+  function renderTransactions() {
+    return (
+      <>
+        <AppText style={[styles.sectionTitle, { color: colors.text }]}>
+          Add a transaction
+        </AppText>
+
+        <View
+          style={[
+            styles.form,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <AppText style={[styles.cardLabel, { color: colors.muted }]}>
+            Description
+          </AppText>
+          <TextInput
+            style={[
+              styles.input,
+              {
+                color: colors.text,
+                borderColor: colors.border,
+                fontFamily:
+                  fontPreference === 'Serif'
+                    ? 'serif'
+                    : fontPreference === 'Monospace'
+                      ? 'monospace'
+                      : undefined,
+              },
+            ]}
+            placeholder="e.g. Groceries"
+            placeholderTextColor={colors.muted}
+            value={title}
+            onChangeText={setTitle}
+          />
+
+          <AppText style={[styles.cardLabel, { color: colors.muted }]}>
+            Amount in KSh
+          </AppText>
+          <TextInput
+            style={[
+              styles.input,
+              {
+                color: colors.text,
+                borderColor: colors.border,
+                fontFamily:
+                  fontPreference === 'Serif'
+                    ? 'serif'
+                    : fontPreference === 'Monospace'
+                      ? 'monospace'
+                      : undefined,
+              },
+            ]}
+            placeholder="e.g. 500"
+            placeholderTextColor={colors.muted}
+            value={amount}
+            onChangeText={setAmount}
+            keyboardType="decimal-pad"
+          />
+
+          <AppText style={[styles.cardLabel, { color: colors.muted }]}>
+            Transaction type
+          </AppText>
+          <View style={styles.optionRow}>
+            {(['Expense', 'Income'] as const).map((option) => (
+              <TouchableOpacity
+                key={option}
+                onPress={() => setType(option)}
+                style={[
+                  styles.optionButton,
+                  { backgroundColor: colors.background },
+                  type === option && [styles.optionSelected, { backgroundColor: themeColor }],
+                ]}
+              >
+                <AppText
+                  style={{
+                    color: type === option ? '#FFFFFF' : colors.text,
+                    fontWeight: '600',
+                  }}
+                >
+                  {option}
+                </AppText>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <AppText style={[styles.cardLabel, { color: colors.muted }]}>
+            Category
+          </AppText>
+          <View style={styles.categoryRow}>
+            {['Food', 'Transport', 'Salary', 'Shopping', 'Bills', 'Other'].map(
+              (option) => (
+                <TouchableOpacity
+                  key={option}
+                  onPress={() => setCategory(option)}
+                  style={[
+                    styles.categoryButton,
+                    { backgroundColor: colors.background },
+                    category === option && [styles.optionSelected, { backgroundColor: themeColor }],
+                  ]}
+                >
+                  <AppText
+                    style={{
+                      color: category === option ? '#FFFFFF' : colors.text,
+                      fontWeight: '600',
+                    }}
+                  >
+                    {option}
+                  </AppText>
+                </TouchableOpacity>
+              ),
+            )}
+          </View>
+
+          <TouchableOpacity
+            style={[styles.primaryButton, { backgroundColor: themeColor }]}
+            onPress={addTransaction}
+          >
+            <AppText style={styles.primaryButtonText}>+ Add transaction</AppText>
+          </TouchableOpacity>
+        </View>
+
+        <AppText style={[styles.sectionTitle, { color: colors.text }]}>
+          All transactions ({transactions.length})
+        </AppText>
+
+        {transactions.length === 0 ? (
+          <AppText style={[styles.emptyText, { color: colors.muted }]}>
+            Your transaction history will appear here.
+          </AppText>
+        ) : (
+          transactions.map(renderTransaction)
+        )}
+      </>
+    );
+  }
+
+  function renderInsights() {
+    const expenseTransactions = transactions.filter(
+      (item) => item.type === 'Expense',
+    );
+    const categoryTotals = expenseTransactions.reduce<Record<string, number>>(
+      (totals, item) => {
+        totals[item.category] = (totals[item.category] || 0) + item.amount;
+        return totals;
+      },
+      {},
+    );
+
+    const categories = Object.entries(categoryTotals).sort(
+      (a, b) => b[1] - a[1],
+    );
+
+    return (
+      <>
+        <View
+          style={[
+            styles.infoCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <AppText style={[styles.cardLabel, { color: colors.muted }]}>
+            MONEY LEFT
+          </AppText>
+          <AppText style={[styles.insightAmount, { color: colors.text }]}>
+            {money(balance)}
+          </AppText>
+          <AppText style={[styles.smallMuted, { color: colors.muted }]}>
+            Based on all transactions currently recorded.
+          </AppText>
+        </View>
+
+        {renderSummaryCards()}
+
+        <AppText style={[styles.sectionTitle, { color: colors.text }]}>
+          Expenses by category
+        </AppText>
+
+        {categories.length === 0 ? (
+          <AppText style={[styles.emptyText, { color: colors.muted }]}>
+            Add expense transactions to see your category breakdown.
+          </AppText>
+        ) : (
+          categories.map(([name, total]) => {
+            const percentage = expenses > 0 ? (total / expenses) * 100 : 0;
+            return (
+              <View
+                key={name}
+                style={[
+                  styles.categoryCard,
+                  { backgroundColor: colors.surface, borderColor: colors.border },
+                ]}
+              >
+                <View style={styles.sectionHeadingRow}>
+                  <AppText style={[styles.transactionTitle, { color: colors.text }]}>
+                    {name}
+                  </AppText>
+                  <AppText style={[styles.transactionTitle, { color: colors.text }]}>
+                    {money(total)}
+                  </AppText>
+                </View>
+                <View
+                  style={[
+                    styles.progressTrack,
+                    { backgroundColor: colors.background },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.progressBar,
+                      { width: `${percentage}%`, backgroundColor: themeColor },
+                    ]}
+                  />
+                </View>
+                <AppText style={[styles.smallMuted, { color: colors.muted }]}>
+                  {percentage.toFixed(1)}% of recorded expenses
+                </AppText>
+              </View>
+            );
+          })
+        )}
+      </>
+    );
+  }
+
+  function renderSettings() {
+    return (
+      <>
+        <View
+          style={[
+            styles.infoCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <AppText style={[styles.sectionTitle, { color: colors.text }]}>
+            Appearance
+          </AppText>
+          <AppText style={[styles.smallMuted, { color: colors.muted }]}>
+            Choose how PocketTrack looks on this device.
+          </AppText>
+          <View style={styles.optionRow}>
+            {['Light', 'Dark'].map((option) => (
+              <TouchableOpacity
+                key={option}
+                onPress={() => setAppearance(option)}
+                style={[
+                  styles.optionButton,
+                  { backgroundColor: colors.background },
+                  appearance === option && [styles.optionSelected, { backgroundColor: themeColor }],
+                ]}
+              >
+                <AppText
+                  style={{
+                    color: appearance === option ? '#FFFFFF' : colors.text,
+                    fontWeight: '600',
+                  }}
+                >
+                  {option}
+                </AppText>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <AppText style={[styles.smallMuted, { color: colors.muted }]}>
+            Your light or dark appearance preference is saved on this device.
+          </AppText>
+        </View>
+
+        <View
+          style={[
+            styles.infoCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <AppText style={[styles.sectionTitle, { color: colors.text }]}>
+            Theme colour
+          </AppText>
+          <AppText style={[styles.smallMuted, { color: colors.muted }]}>
+            Pick an accent colour for buttons, highlights and navigation.
+          </AppText>
+          <View style={styles.themeOptionsRow}>
+            {themeOptions.map((option) => (
+              <TouchableOpacity
+                key={option.value}
+                accessibilityRole="button"
+                accessibilityLabel={`${option.name} theme colour`}
+                accessibilityState={{ selected: themeColor === option.value }}
+                onPress={() => {
+                  setThemeColor(option.value);
+                  setCustomColor(option.value);
+                }}
+                style={[
+                  styles.themeSwatch,
+                  { backgroundColor: option.value },
+                  themeColor === option.value && styles.themeSwatchSelected,
+                ]}
+              >
+                {themeColor === option.value && (
+                  <NativeText style={styles.swatchCheck}>✓</NativeText>
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+          <AppText style={[styles.smallMuted, { color: colors.muted, marginTop: 6 }]}>
+            Custom colour (hex code)
+          </AppText>
+          <View style={styles.customColorRow}>
+            <TextInput
+              value={customColor}
+              onChangeText={setCustomColor}
+              autoCapitalize="characters"
+              maxLength={7}
+              placeholder="#E85D9E"
+              placeholderTextColor={colors.muted}
+              style={[
+                styles.input,
+                styles.customColorInput,
+                {
+                color: colors.text,
+                borderColor: colors.border,
+                fontFamily:
+                  fontPreference === 'Serif'
+                    ? 'serif'
+                    : fontPreference === 'Monospace'
+                      ? 'monospace'
+                      : undefined,
+              },
+              ]}
+            />
+            <TouchableOpacity
+              onPress={() => {
+                if (/^#[0-9A-Fa-f]{6}$/.test(customColor.trim())) {
+                  setThemeColor(customColor.trim().toUpperCase());
+                } else {
+                  Alert.alert('Invalid colour', 'Enter a hex code like #E85D9E.');
+                }
+              }}
+              style={[styles.applyColorButton, { backgroundColor: themeColor }]}
+            >
+              <NativeText style={styles.primaryButtonText}>Apply</NativeText>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View
+          style={[
+            styles.infoCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <AppText style={[styles.sectionTitle, { color: colors.text }]}>
+            Font preference
+          </AppText>
+          <AppText style={[styles.smallMuted, { color: colors.muted }]}>
+            Preview the font style and choose the one that's easiest for you to read.
+          </AppText>
+          <View style={styles.fontOptions}>
+            {([
+              { name: 'System', sample: 'Aa', description: 'Clean and familiar' },
+              { name: 'Serif', sample: 'Aa', description: 'Classic, book-like' },
+              { name: 'Monospace', sample: 'Aa', description: 'Technical, fixed-width' },
+            ] as const).map((option) => (
+              <TouchableOpacity
+                key={option.name}
+                onPress={() => setFontPreference(option.name)}
+                style={[
+                  styles.fontOption,
+                  { backgroundColor: colors.background, borderColor: colors.border },
+                  fontPreference === option.name && {
+                    borderColor: themeColor,
+                    borderWidth: 2,
+                  },
+                ]}
+              >
+                <NativeText
+                  style={{
+                    color: colors.text,
+                    fontSize: 24,
+                    fontFamily:
+                      option.name === 'Serif'
+                        ? 'serif'
+                        : option.name === 'Monospace'
+                          ? 'monospace'
+                          : undefined,
+                  }}
+                >
+                  {option.sample}
+                </NativeText>
+                <AppText style={[styles.transactionTitle, { color: colors.text }]}>
+                  {option.name}
+                </AppText>
+                <AppText style={[styles.smallMuted, { color: colors.muted }]}>
+                  {option.description}
+                </AppText>
+                {fontPreference === option.name && (
+                  <AppText style={{ color: themeColor, fontSize: 12, fontWeight: '700' }}>
+                    Selected
+                  </AppText>
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+          <AppText style={[styles.smallMuted, { color: colors.muted, marginTop: 10 }]}>
+            Your theme and font choices are saved on this device.
+          </AppText>
+        </View>
+
+        <View
+          style={[
+            styles.infoCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <AppText style={[styles.sectionTitle, { color: colors.text }]}>
+            Your data
+          </AppText>
+          <AppText style={[styles.smallMuted, { color: colors.muted }]}>
+            Transactions are stored locally on this device using AsyncStorage.
+            They do not automatically sync between your phone and computer.
+          </AppText>
+          <AppText style={[styles.smallMuted, { color: colors.muted, marginTop: 12 }]}>
+            Transactions recorded: {transactions.length}
+          </AppText>
+        </View>
+
+        <View
+          style={[
+            styles.infoCard,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          <AppText style={[styles.sectionTitle, { color: colors.text }]}>
+            Feedback
+          </AppText>
+          <AppText style={[styles.smallMuted, { color: colors.muted }]}>
+            Enjoying the app? Feedback and rating options will be added as we
+            develop the settings screen.
+          </AppText>
+        </View>
+      </>
+    );
   }
 
   if (!isLoaded) {
     return (
       <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>
-          Loading your transactions...
-        </Text>
+        <AppText style={styles.loadingText}>Loading your transactions...</AppText>
       </View>
     );
   }
 
+  const pageTitle: Record<Screen, string> = {
+    Home: 'Your financial overview',
+    Transactions: 'Manage your money',
+    Insights: 'Understand your spending',
+    Settings: 'Make it yours',
+  };
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.greeting}>Hello, Rue!</Text>
-      <Text style={styles.heading}>Personal Expense Tracker</Text>
+    <View style={[styles.app, { backgroundColor: colors.background }]}>
+      {wideScreen && renderSidebar()}
 
-      <View style={styles.balanceCard}>
-        <Text style={styles.balanceLabel}>Available Balance</Text>
-        <Text style={styles.balance}>
-          KSh {balance.toLocaleString('en-KE')}
-        </Text>
-      </View>
-
-      <View style={styles.summaryRow}>
-        <View style={styles.summaryCard}>
-          <Text style={styles.cardLabel}>Income</Text>
-          <Text style={styles.income}>
-            KSh {income.toLocaleString('en-KE')}
-          </Text>
+      {!wideScreen && drawerOpen && (
+        <View style={styles.drawerLayer}>
+          <TouchableOpacity
+            accessibilityLabel="Close navigation menu"
+            style={styles.drawerBackdrop}
+            onPress={() => setDrawerOpen(false)}
+          />
+          {renderSidebar()}
         </View>
-
-        <View style={styles.summaryCard}>
-          <Text style={styles.cardLabel}>Expenses</Text>
-          <Text style={styles.expense}>
-            KSh {expenses.toLocaleString('en-KE')}
-          </Text>
-        </View>
-      </View>
-
-      <Text style={styles.sectionTitle}>Add Transaction</Text>
-
-      <View style={styles.form}>
-        <TextInput
-          style={styles.input}
-          placeholder="Description (e.g. Groceries)"
-          value={title}
-          onChangeText={setTitle}
-        />
-
-        <TextInput
-          style={styles.input}
-          placeholder="Amount in KSh"
-          value={amount}
-          onChangeText={setAmount}
-          keyboardType="decimal-pad"
-        />
-
-        <Text style={styles.cardLabel}>Transaction Type</Text>
-
-        <View style={styles.summaryRow}>
-          {(['Expense', 'Income'] as const).map((option) => (
-            <TouchableOpacity
-              key={option}
-              style={[
-                styles.typeButton,
-                type === option && styles.selectedButton,
-              ]}
-              onPress={() => setType(option)}
-            >
-              <Text
-                style={[
-                  styles.typeText,
-                  type === option && styles.selectedText,
-                ]}
-              >
-                {option}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <Text style={styles.cardLabel}>Category</Text>
-
-        <View style={styles.categoryRow}>
-          {['Food', 'Transport', 'Salary', 'Other'].map((option) => (
-            <TouchableOpacity
-              key={option}
-              style={[
-                styles.categoryButton,
-                category === option && styles.selectedButton,
-              ]}
-              onPress={() => setCategory(option)}
-            >
-              <Text
-                style={[
-                  styles.typeText,
-                  category === option && styles.selectedText,
-                ]}
-              >
-                {option}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={addTransaction}
-        >
-          <Text style={styles.addButtonText}>Add Transaction</Text>
-        </TouchableOpacity>
-      </View>
-
-      <Text style={styles.sectionTitle}>Recent Transactions</Text>
-
-      {transactions.length === 0 ? (
-        <Text style={styles.emptyText}>
-          No transactions yet. Add your first one above!
-        </Text>
-      ) : (
-        transactions.map((item) => (
-          <View key={item.id} style={styles.transactionRow}>
-            <View style={styles.transactionInfo}>
-              <Text style={styles.transactionTitle}>{item.title}</Text>
-              <Text style={styles.cardLabel}>{item.category}</Text>
-            </View>
-
-            <Text
-              style={
-                item.type === 'Income' ? styles.income : styles.expense
-              }
-            >
-              {item.type === 'Income' ? '+' : '-'} KSh{' '}
-              {item.amount.toLocaleString('en-KE')}
-            </Text>
-          </View>
-        ))
       )}
-    </ScrollView>
+
+      <View style={styles.main}>
+        <View
+          style={[
+            styles.topbar,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}
+        >
+          {!wideScreen && (
+            <TouchableOpacity
+              accessibilityLabel="Open navigation menu"
+              onPress={() => setDrawerOpen(true)}
+              style={styles.menuButton}
+            >
+              <AppText style={[styles.menuText, { color: colors.text }]}>☰</AppText>
+            </TouchableOpacity>
+          )}
+
+          <View style={{ flex: 1 }}>
+            <AppText style={[styles.topbarTitle, { color: colors.text }]}>
+              {screen}
+            </AppText>
+            <AppText style={[styles.smallMuted, { color: colors.muted }]}>
+              {pageTitle[screen]}
+            </AppText>
+          </View>
+
+          <View style={styles.topbarBadge}>
+            <AppText style={styles.topbarBadgeText}>R</AppText>
+          </View>
+        </View>
+
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+        >
+          <AppText style={[styles.greeting, { color: colors.muted }]}>
+            Hello, Rue!
+          </AppText>
+          <AppText style={[styles.pageHeading, { color: colors.text }]}>
+            {screen === 'Home'
+              ? 'Personal Expense Tracker'
+              : pageTitle[screen]}
+          </AppText>
+
+          {screen === 'Home' && renderHome()}
+          {screen === 'Transactions' && renderTransactions()}
+          {screen === 'Insights' && renderInsights()}
+          {screen === 'Settings' && renderSettings()}
+
+          <AppText style={[styles.footer, { color: colors.muted }]}>
+            PocketTrack · Your money, made clearer
+          </AppText>
+        </ScrollView>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    padding: 20,
-    paddingTop: 55,
-    backgroundColor: '#F5F7FB',
-    flexGrow: 1,
+  app: {
+    flex: 1,
+    flexDirection: 'row',
   },
   loadingContainer: {
     flex: 1,
@@ -289,145 +943,405 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F7FB',
   },
   loadingText: {
-    fontSize: 16,
     color: '#172033',
+    fontSize: 16,
+  },
+  sidebar: {
+    width: 245,
+    borderRightWidth: 1,
+    paddingHorizontal: 18,
+    paddingTop: 32,
+    paddingBottom: 20,
+  },
+  drawer: {
+    position: 'absolute',
+    zIndex: 3,
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: 270,
+    elevation: 12,
+  },
+  drawerLayer: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 5,
+    justifyContent: 'flex-start',
+  },
+  drawerBackdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(10, 16, 30, 0.48)',
+  },
+  brand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    marginBottom: 42,
+  },
+  brandIcon: {
+    width: 43,
+    height: 43,
+    borderRadius: 13,
+    backgroundColor: '#3157D5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  brandIconText: {
+    color: '#FFFFFF',
+    fontSize: 27,
+    fontWeight: 'bold',
+  },
+  brandName: {
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  smallMuted: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  navLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    marginBottom: 12,
+    marginLeft: 10,
+  },
+  navItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 13,
+    borderRadius: 11,
+    marginBottom: 7,
+    gap: 12,
+  },
+  navItemSelected: {
+    backgroundColor: '#3157D5',
+  },
+  navIcon: {
+    width: 25,
+    textAlign: 'center',
+    fontSize: 23,
+  },
+  navText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  activeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FFFFFF',
+  },
+  sidebarFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E5EF',
+    paddingTop: 18,
+    marginTop: 'auto',
+  },
+  avatar: {
+    width: 37,
+    height: 37,
+    borderRadius: 19,
+    backgroundColor: '#E6ECFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    color: '#3157D5',
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  profileName: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  main: {
+    flex: 1,
+    minWidth: 0,
+  },
+  topbar: {
+    minHeight: 76,
+    paddingHorizontal: 25,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 15,
+  },
+  topbarTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  topbarBadge: {
+    height: 38,
+    width: 38,
+    borderRadius: 19,
+    backgroundColor: '#E6ECFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  topbarBadgeText: {
+    color: '#3157D5',
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  menuButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuText: {
+    fontSize: 25,
+  },
+  content: {
+    padding: 25,
+    paddingBottom: 45,
+    width: '100%',
+    maxWidth: 1100,
+    alignSelf: 'center',
   },
   greeting: {
-    fontSize: 16,
-    color: '#666',
+    fontSize: 14,
+    marginBottom: 5,
   },
-  heading: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginTop: 6,
-    marginBottom: 20,
-    color: '#172033',
+  pageHeading: {
+    fontSize: 25,
+    fontWeight: '800',
+    marginBottom: 22,
   },
   balanceCard: {
-    backgroundColor: '#3157D5',
-    padding: 22,
-    borderRadius: 16,
-    marginBottom: 16,
+    padding: 25,
+    borderRadius: 18,
+    marginBottom: 18,
   },
   balanceLabel: {
-    fontSize: 13,
+    color: '#E5EAFF',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  balanceAmount: {
     color: '#FFFFFF',
+    fontSize: 31,
+    fontWeight: '800',
+    marginTop: 10,
   },
-  cardLabel: {
-    fontSize: 13,
-    color: '#777',
-  },
-  balance: {
-    fontSize: 29,
-    fontWeight: 'bold',
-    color: '#FFF',
-    marginTop: 8,
+  balanceNote: {
+    color: '#E5EAFF',
+    fontSize: 12,
+    marginTop: 9,
   },
   summaryRow: {
     flexDirection: 'row',
-    gap: 12,
-    marginBottom: 18,
+    gap: 13,
+    marginBottom: 22,
   },
   summaryCard: {
     flex: 1,
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    padding: 16,
+    minWidth: 0,
+    padding: 17,
+    borderWidth: 1,
+    borderRadius: 14,
   },
-  income: {
-    color: '#13834B',
-    fontWeight: 'bold',
-    fontSize: 16,
+  cardLabel: {
+    fontSize: 12,
+    marginBottom: 8,
   },
-  expense: {
-    color: '#D14343',
-    fontWeight: 'bold',
-    fontSize: 16,
+  summaryAmount: {
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  sectionHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
   },
   sectionTitle: {
-    fontSize: 19,
-    fontWeight: 'bold',
+    fontSize: 18,
+    fontWeight: '800',
     marginTop: 12,
-    marginBottom: 12,
-    color: '#172033',
+    marginBottom: 13,
+  },
+  linkText: {
+    color: '#3157D5',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  transactionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderRadius: 13,
+    borderWidth: 1,
+    marginBottom: 9,
+  },
+  transactionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#EEF1FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  transactionIconText: {
+    color: '#3157D5',
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  transactionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  emptyText: {
+    textAlign: 'center',
+    padding: 22,
+    lineHeight: 21,
   },
   form: {
-    backgroundColor: '#FFF',
-    padding: 16,
-    borderRadius: 14,
-    marginBottom: 16,
-    gap: 12,
+    padding: 17,
+    borderRadius: 15,
+    borderWidth: 1,
+    gap: 10,
+    marginBottom: 18,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#D9DFEA',
-    borderRadius: 9,
-    padding: 12,
+    borderRadius: 10,
+    paddingHorizontal: 13,
+    paddingVertical: 12,
     fontSize: 15,
-    backgroundColor: '#FFF',
   },
-  typeButton: {
+  optionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 8,
+  },
+  optionButton: {
     flex: 1,
-    padding: 12,
-    borderRadius: 9,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 10,
     alignItems: 'center',
-    backgroundColor: '#EEF1F7',
   },
-  selectedButton: {
+  optionSelected: {
     backgroundColor: '#3157D5',
-  },
-  typeText: {
-    color: '#333',
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  selectedText: {
-    color: '#FFF',
   },
   categoryRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+    marginBottom: 5,
   },
   categoryButton: {
-    paddingVertical: 10,
     paddingHorizontal: 12,
+    paddingVertical: 10,
     borderRadius: 9,
-    backgroundColor: '#EEF1F7',
   },
-  addButton: {
-    backgroundColor: '#172033',
+  primaryButton: {
+    backgroundColor: '#3157D5',
     padding: 15,
+    borderRadius: 11,
+    alignItems: 'center',
+    marginTop: 7,
+  },
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  themeOptionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 16,
+    marginBottom: 12,
+  },
+  themeSwatch: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  themeSwatchSelected: {
+    borderColor: '#FFFFFF',
+    transform: [{ scale: 1.08 }],
+  },
+  swatchCheck: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  customColorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 6,
+  },
+  customColorInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  applyColorButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 13,
     borderRadius: 10,
     alignItems: 'center',
-    marginTop: 4,
+    justifyContent: 'center',
   },
-  addButtonText: {
-    color: '#FFF',
-    fontWeight: 'bold',
-    fontSize: 15,
-  },
-  transactionRow: {
+  fontOptions: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#FFF',
-    padding: 15,
-    borderRadius: 12,
-    marginBottom: 10,
+    gap: 8,
+    marginTop: 16,
   },
-  transactionInfo: {
+  fontOption: {
     flex: 1,
-    gap: 4,
+    minWidth: 0,
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 5,
   },
-  transactionTitle: {
-    fontWeight: '600',
-    fontSize: 15,
-    color: '#172033',
+  infoCard: {
+    padding: 19,
+    borderRadius: 15,
+    borderWidth: 1,
+    marginBottom: 14,
   },
-  emptyText: {
-    color: '#666',
-    padding: 16,
+  insightAmount: {
+    fontSize: 27,
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+  categoryCard: {
+    padding: 15,
+    borderRadius: 13,
+    borderWidth: 1,
+    marginBottom: 10,
+    gap: 10,
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: 5,
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: 8,
+    borderRadius: 5,
+    backgroundColor: '#3157D5',
+  },
+  footer: {
+    fontSize: 11,
     textAlign: 'center',
+    marginTop: 30,
   },
 });
